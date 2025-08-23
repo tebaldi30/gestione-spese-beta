@@ -1,44 +1,84 @@
-import os
-from sqlalchemy import create_engine, text
-import pandas as pd
+import psycopg2
+import psycopg2.extras
+import streamlit as st
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# Connessione al database PostgreSQL tramite variabile d'ambiente
-DB_URL = os.environ.get("DATABASE_URL")  # Assicurati di aver impostato DATABASE_URL su Streamlit Cloud
-engine = create_engine(DB_URL, echo=True)
+def get_connection():
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
+    return conn
 
-# --- Funzioni per utenti ---
-def get_user(email):
-    """Restituisce l'utente se esiste, altrimenti None"""
-    query = text("SELECT * FROM utenti WHERE email = :email")
-    result = pd.read_sql(query, engine, params={"email": email})
-    return result.iloc[0] if not result.empty else None
+def init_db():
+    conn = get_connection()
+    cur = conn.cursor()
 
-def create_user(email):
-    """Crea un nuovo utente e restituisce l'id"""
-    query = text("INSERT INTO utenti (email) VALUES (:email) RETURNING id")
-    with engine.connect() as conn:
-        result = conn.execute(query, {"email": email}).fetchone()
-        conn.commit()
-        return result[0]
-
-# --- Funzioni per movimenti ---
-def get_movimenti(user_id):
-    """Restituisce tutti i movimenti di un utente ordinati per data"""
-    query = text("SELECT * FROM movimenti WHERE user_id = :user_id ORDER BY data DESC")
-    return pd.read_sql(query, engine, params={"user_id": user_id})
-
-def salva_dato(user_id, tipo, data, importo, categoria=""):
-    """Salva un nuovo movimento"""
-    query = text("""
-        INSERT INTO movimenti (user_id, tipo, data, importo, categoria)
-        VALUES (:user_id, :tipo, :data, :importo, :categoria)
+    # Tabella utenti
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    );
     """)
-    with engine.connect() as conn:
-        conn.execute(query, {
-            "user_id": user_id,
-            "tipo": tipo,
-            "data": data,
-            "importo": importo,
-            "categoria": categoria
-        })
+
+    # Tabella movimenti (spese/risparmi)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS movimenti (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        tipo TEXT NOT NULL,
+        data DATE NOT NULL,
+        importo NUMERIC NOT NULL,
+        categoria TEXT
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# --- Gestione utenti ---
+def register_user(email, password):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO users (email, password) VALUES (%s, %s) RETURNING id",
+                    (email, generate_password_hash(password)))
         conn.commit()
+        return True
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+def login_user(email, password):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    if user and check_password_hash(user["password"], password):
+        return dict(user)
+    return None
+
+# --- Movimenti ---
+def add_movimento(user_id, tipo, data, importo, categoria=""):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO movimenti (user_id, tipo, data, importo, categoria) VALUES (%s, %s, %s, %s, %s)",
+        (user_id, tipo, data, importo, categoria)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def get_movimenti(user_id):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM movimenti WHERE user_id = %s ORDER BY data DESC", (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
