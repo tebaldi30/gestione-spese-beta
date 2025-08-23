@@ -1,122 +1,84 @@
+import psycopg2
+import psycopg2.extras
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import date
-from utils.db import get_user, create_user, get_movimenti, salva_dato
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# --- Configurazione pagina ---
-st.set_page_config(page_title="💰 Gestione Spese e Risparmi", layout="wide")
-st.title("💰 Gestione Spese e Risparmi")
+def get_connection():
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
+    return conn
 
-# --- LOGIN via email ---
-if "user_id" not in st.session_state:
-    email = st.text_input("Inserisci la tua email per accedere:")
-    if st.button("Accedi"):
-        user = get_user(email)
-        if user is None:
-            user_id = create_user(email)
-            st.success("Account creato!")
-        else:
-            user_id = user['id']
-            st.success("Login effettuato!")
-        st.session_state.user_id = user_id
+def init_db():
+    conn = get_connection()
+    cur = conn.cursor()
 
-# --- Funzione helper ---
-def clean_importo(series):
-    return pd.to_numeric(
-        series.astype(str)
-        .str.replace("€", "")
-        .str.replace(".", "", regex=False)
-        .str.replace(",", ".", regex=False)
-        .str.strip(),
-        errors="coerce"
+    # Tabella utenti
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    );
+    """)
+
+    # Tabella movimenti (spese/risparmi)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS movimenti (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        tipo TEXT NOT NULL,
+        data DATE NOT NULL,
+        importo NUMERIC NOT NULL,
+        categoria TEXT
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# --- Gestione utenti ---
+def register_user(email, password):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO users (email, password) VALUES (%s, %s) RETURNING id",
+                    (email, generate_password_hash(password)))
+        conn.commit()
+        return True
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+def login_user(email, password):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    if user and check_password_hash(user["password"], password):
+        return dict(user)
+    return None
+
+# --- Movimenti ---
+def add_movimento(user_id, tipo, data, importo, categoria=""):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO movimenti (user_id, tipo, data, importo, categoria) VALUES (%s, %s, %s, %s, %s)",
+        (user_id, tipo, data, importo, categoria)
     )
+    conn.commit()
+    cur.close()
+    conn.close()
 
-def format_currency(value):
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-# --- Main app solo se loggato ---
-if "user_id" in st.session_state:
-    user_id = st.session_state.user_id
-
-    # --- Carica i dati ---
-    df = get_movimenti(user_id)
-
-    # --- Pallina sotto il titolo ---
-    spese_importo = clean_importo(df[df["tipo"] == "Spesa"]["importo"]) if not df.empty else pd.Series(dtype=float)
-    totale_spese = spese_importo.sum() if not df.empty else 0.0
-
-    colore = "green" if totale_spese < 2000 else "red"
-    classe = "blinking" if colore == "red" else ""
-
-    st.markdown(
-        f"""
-        <div style="display:flex;align-items:center;gap:10px;margin-top:5px;">
-            <div style="width:20px;height:20px;border-radius:50%;background:{colore};"
-                 class="{classe}"></div>
-            <span style="font-size:16px;">Totale Spese: {format_currency(totale_spese)} €</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # --- Form Spese ---
-    st.subheader("➖ Aggiungi Spesa")
-    with st.form("spese_form", clear_on_submit=True):
-        data_spesa = st.date_input("Data spesa")
-        tipo_spesa = st.text_input("Categoria (es. affitto, cibo, bollette)")
-        valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
-        submitted_spesa = st.form_submit_button("Aggiungi Spesa")
-        if submitted_spesa and valore_spesa > 0:
-            salva_dato(user_id, "Spesa", data_spesa, valore_spesa, tipo_spesa)
-            st.success("Spesa registrata!")
-
-    # --- Form Risparmi/Prelievi ---
-    st.subheader("💵 Gestione Risparmi")
-    with st.form("risparmi_form", clear_on_submit=True):
-        data_risp = st.date_input("Data risparmio/prelievo")
-        tipo_risp = st.radio("Tipo movimento", ["Risparmio", "Prelievo"])
-        valore_risp = st.number_input("Importo (€)", min_value=0.0, step=1.0)
-        submitted_risp = st.form_submit_button("Registra Movimento")
-        if submitted_risp and valore_risp > 0:
-            if tipo_risp == "Prelievo":
-                valore_risp = -valore_risp
-            salva_dato(user_id, "Risparmio", data_risp, valore_risp, tipo_risp)
-            st.success(f"{tipo_risp} registrato!")
-
-    # --- Riepilogo Movimenti ---
-    st.header("📊 Riepilogo Movimenti")
-    if not df.empty:
-        df["Importo"] = clean_importo(df["importo"]).apply(format_currency)
-        st.dataframe(df[["data", "tipo", "categoria", "Importo"]])
-
-        # Totale spese e risparmi
-        totale_spese = clean_importo(df[df["tipo"]=="Spesa"]["importo"]).sum()
-        totale_risparmi = clean_importo(df[df["tipo"]=="Risparmio"]["importo"]).sum()
-        st.metric("Totale Spese", format_currency(totale_spese) + " €")
-        st.metric("Saldo Risparmi", format_currency(totale_risparmi) + " €")
-
-        # Grafico a torta spese vs disponibile
-        soglia_massima = 2500.0
-        totale_spese_valore = min(totale_spese, soglia_massima)
-        restante = soglia_massima - totale_spese_valore
-
-        valori = [totale_spese_valore, restante]
-        colori = ["#e74c3c", "#27ae60"]
-
-        fig, ax = plt.subplots()
-        fig.patch.set_alpha(0.0)
-        ax.patch.set_alpha(0.0)
-        wedges, texts, autotexts = ax.pie(
-            valori, colors=colori, autopct='%1.1f%%',
-            pctdistance=1.1, startangle=90, counterclock=False,
-            wedgeprops={'edgecolor':'white','linewidth':2},
-            textprops={'color':'black','weight':'bold'}
-        )
-        for text in texts:
-            text.set_text('')
-        ax.axis('equal')
-        st.subheader("📈 Andamento Mensile")
-        st.pyplot(fig)
-    else:
-        st.info("Nessun movimento registrato.")
+def get_movimenti(user_id):
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT * FROM movimenti WHERE user_id = %s ORDER BY data DESC", (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
