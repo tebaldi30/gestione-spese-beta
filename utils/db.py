@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 
 # Connessione al database PostgreSQL (variabile ambiente su Streamlit Cloud)
-DB_URL = os.environ.get("DB_URL")
+DB_URL = os.environ.get("postgresql://gestione_spese_db_user:SYsP3JeKxJX66Toq1BXnJSciX2gUx6EE@dpg-d2l2k8v5r7bs73d91ar0-a.oregon-postgres.render.com/gestione_spese_db")
 engine = create_engine(DB_URL)
 
 # --- Funzioni per utenti ---
