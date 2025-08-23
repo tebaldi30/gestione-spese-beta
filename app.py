@@ -73,38 +73,50 @@ def show_dashboard():
     # --- Carica i dati dal DB ---
     df = pd.DataFrame(get_movimenti(st.session_state.user))
 
-    # Se non ci sono dati ancora
-    if df.empty:
+    # Se non ci sono dati ancora o mancano colonne
+    if df.empty or "tipo" not in df.columns:
         st.info("Nessun dato ancora inserito.")
-    else:
-        df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
 
-    # --- Form spese ---
-    st.subheader("➖ Aggiungi Spesa")
-    with st.form("spese_form", clear_on_submit=True):
-        data_spesa = st.date_input("Data spesa")
-        tipo_spesa = st.text_input("Categoria (es. affitto, cibo, bollette)")
-        valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
-        submitted_spesa = st.form_submit_button("Aggiungi Spesa")
-        if submitted_spesa and valore_spesa > 0:
-            add_movimento(st.session_state.user, "Spesa", data_spesa, valore_spesa, tipo_spesa)
-            st.success("Spesa registrata!")
-            st.rerun()
+        # Mostra comunque i form per inserire dati anche a utente nuovo
+        st.subheader("➖ Aggiungi Spesa")
+        with st.form("spese_form", clear_on_submit=True):
+            data_spesa = st.date_input("Data spesa")
+            tipo_spesa = st.text_input("Categoria (es. affitto, cibo, bollette)")
+            valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
+            submitted_spesa = st.form_submit_button("Aggiungi Spesa")
+            if submitted_spesa and valore_spesa > 0:
+                add_movimento(st.session_state.user, "Spesa", data_spesa, valore_spesa, tipo_spesa)
+                st.success("Spesa registrata!")
+                st.rerun()
 
-    # --- Aggiorna dati ---
-    df = pd.DataFrame(get_movimenti(st.session_state.user))
-    if not df.empty:
-        df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
+        st.subheader("💵 Gestione Risparmi")
+        with st.form("risparmi_form", clear_on_submit=True):
+            data_risp = st.date_input("Data risparmio/prelievo")
+            tipo_risp = st.radio("Tipo movimento", ["Risparmio", "Prelievo"])
+            valore_risp = st.number_input("Importo (€)", min_value=0.0, step=1.0)
+            submitted_risp = st.form_submit_button("Registra Movimento")
+            if submitted_risp and valore_risp > 0:
+                if tipo_risp == "Prelievo":
+                    valore_risp = -valore_risp
+                add_movimento(st.session_state.user, "Risparmio", data_risp, valore_risp, tipo_risp)
+                st.success(f"{tipo_risp} registrato!")
+                st.rerun()
 
-    # --- RIEPILOGO SPESE E ANDAMENTO MENSILE ---
-    if not df.empty:
-        st.header("📊 Riepilogo Spese")
+        # Non procedere oltre per riepiloghi se dataset vuoto
+        return
+
+    # Dataframe ha dati e colonne
+    df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
+
+    if "tipo" in df.columns:
+        # --- RIEPILOGO SPESE E ANDAMENTO MENSILE ---
         spese = df[df["tipo"] == "Spesa"].copy()
         if not spese.empty:
             spese["importo"] = pd.to_numeric(spese["importo"], errors="coerce")
             totale_spese = spese["importo"].sum()
             totale_spese_formatted = format_currency(totale_spese)
 
+            st.header("📊 Riepilogo Spese")
             st.dataframe(
                 spese[["data", "categoria", "importo"]].assign(
                     importo=spese["importo"].apply(format_currency)
@@ -169,7 +181,36 @@ def show_dashboard():
         else:
             st.info("Nessuna spesa registrata.")
 
-    # --- Form risparmi ---
+        # --- RIEPILOGO RISPARMI ---
+        risp = df[df["tipo"] == "Risparmio"].copy()
+        if not risp.empty:
+            risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
+            totale_risparmi = risp["importo"].sum()
+            totale_risparmi_formatted = format_currency(totale_risparmi)
+
+            st.header("💰 Riepilogo Risparmi")
+            st.dataframe(
+                risp[["data", "categoria", "importo"]].assign(
+                    importo=risp["importo"].apply(format_currency)
+                )
+            )
+
+            st.metric("Saldo Risparmi", totale_risparmi_formatted)
+
+            obiettivo_risparmio = 30000.0
+            percentuale_raggiunta = totale_risparmi / obiettivo_risparmio * 100 if obiettivo_risparmio else 0
+            st.subheader("🎯 Percentuale Obiettivo Risparmi")
+            st.metric(
+                label="Risparmio raggiunto",
+                value=f"{percentuale_raggiunta:.1f}%",
+                delta=f"{totale_risparmi_formatted} € su {format_currency(obiettivo_risparmio)} €"
+            )
+        else:
+            st.info("Nessun risparmio registrato.")
+    else:
+        st.info("Nessun dato disponibile.")
+
+    # --- Form risparmi (sempre visibile anche se dati assenti) ---
     st.subheader("💵 Gestione Risparmi")
     with st.form("risparmi_form", clear_on_submit=True):
         data_risp = st.date_input("Data risparmio/prelievo")
@@ -182,33 +223,6 @@ def show_dashboard():
             add_movimento(st.session_state.user, "Risparmio", data_risp, valore_risp, tipo_risp)
             st.success(f"{tipo_risp} registrato!")
             st.rerun()
-
-    # --- RIEPILOGO RISPARMI ---
-    st.header("💰 Riepilogo Risparmi")
-    risp = df[df["tipo"] == "Risparmio"].copy()
-    if not risp.empty:
-        risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
-        totale_risparmi = risp["importo"].sum()
-        totale_risparmi_formatted = format_currency(totale_risparmi)
-
-        st.dataframe(
-            risp[["data", "categoria", "importo"]].assign(
-                importo=risp["importo"].apply(format_currency)
-            )
-        )
-
-        st.metric("Saldo Risparmi", totale_risparmi_formatted)
-
-        obiettivo_risparmio = 30000.0
-        percentuale_raggiunta = totale_risparmi / obiettivo_risparmio * 100 if obiettivo_risparmio else 0
-        st.subheader("🎯 Percentuale Obiettivo Risparmi")
-        st.metric(
-            label="Risparmio raggiunto",
-            value=f"{percentuale_raggiunta:.1f}%",
-            delta=f"{totale_risparmi_formatted} € su {format_currency(obiettivo_risparmio)} €"
-        )
-    else:
-        st.info("Nessun risparmio registrato.")
 
 # ================================
 # ROUTING
