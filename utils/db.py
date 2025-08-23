@@ -1,34 +1,44 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import pandas as pd
 
-# Connessione al database PostgreSQL (variabile ambiente su Streamlit Cloud)
-DB_URL = os.environ.get("postgresql://gestione_spese_db_user:SYsP3JeKxJX66Toq1BXnJSciX2gUx6EE@dpg-d2l2k8v5r7bs73d91ar0-a.oregon-postgres.render.com/gestione_spese_db")
-engine = create_engine(DB_URL)
+# Connessione al database PostgreSQL tramite variabile d'ambiente
+DB_URL = os.environ.get("DATABASE_URL")  # Assicurati di aver impostato DATABASE_URL su Streamlit Cloud
+engine = create_engine(DB_URL, echo=True)
 
 # --- Funzioni per utenti ---
 def get_user(email):
     """Restituisce l'utente se esiste, altrimenti None"""
-    query = f"SELECT * FROM utenti WHERE email='{email}'"
-    result = pd.read_sql(query, engine)
+    query = text("SELECT * FROM utenti WHERE email = :email")
+    result = pd.read_sql(query, engine, params={"email": email})
     return result.iloc[0] if not result.empty else None
 
 def create_user(email):
     """Crea un nuovo utente e restituisce l'id"""
-    query = f"INSERT INTO utenti (email) VALUES ('{email}') RETURNING id"
-    result = engine.execute(query).fetchone()
-    return result[0]
+    query = text("INSERT INTO utenti (email) VALUES (:email) RETURNING id")
+    with engine.connect() as conn:
+        result = conn.execute(query, {"email": email}).fetchone()
+        conn.commit()
+        return result[0]
 
 # --- Funzioni per movimenti ---
 def get_movimenti(user_id):
     """Restituisce tutti i movimenti di un utente ordinati per data"""
-    query = f"SELECT * FROM movimenti WHERE user_id={user_id} ORDER BY data DESC"
-    return pd.read_sql(query, engine)
+    query = text("SELECT * FROM movimenti WHERE user_id = :user_id ORDER BY data DESC")
+    return pd.read_sql(query, engine, params={"user_id": user_id})
 
 def salva_dato(user_id, tipo, data, importo, categoria=""):
     """Salva un nuovo movimento"""
-    query = f"""
-    INSERT INTO movimenti (user_id, tipo, data, importo, categoria)
-    VALUES ({user_id}, '{tipo}', '{data}', {importo}, '{categoria}')
-    """
-    engine.execute(query)
+    query = text("""
+        INSERT INTO movimenti (user_id, tipo, data, importo, categoria)
+        VALUES (:user_id, :tipo, :data, :importo, :categoria)
+    """)
+    with engine.connect() as conn:
+        conn.execute(query, {
+            "user_id": user_id,
+            "tipo": tipo,
+            "data": data,
+            "importo": importo,
+            "categoria": categoria
+        })
+        conn.commit()
