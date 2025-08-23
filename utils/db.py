@@ -68,6 +68,16 @@ def login_user(email, password):
         return user
     return None
 
+# --- Recupera utente da id ---
+def get_user_by_id(user_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, email FROM users WHERE id = %s;", (user_id,))
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    return user
+
 # --- Gestione movimenti ---
 def add_movimento(user_id, tipo, data, importo, categoria):
     conn = get_connection()
