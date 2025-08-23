@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti
+from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti, get_user_by_id
 
 # --- Inizializza DB ---
 init_db()
@@ -24,9 +24,9 @@ def show_login_page():
         email = st.text_input("Email", key="login_email")
         password = st.text_input("Password", type="password", key="login_password")
         if st.button("Accedi"):
-            user_id = login_user(email, password)
-            if user_id:
-                st.session_state.user = user_id
+            user_record = login_user(email, password)
+            if user_record:
+                st.session_state.user = user_record['id']  # memorizza solo l'id utente
                 st.success("✅ Login effettuato con successo!")
                 st.rerun()
             else:
@@ -43,12 +43,21 @@ def show_login_page():
                 st.error("⚠️ Email già registrata")
 
 
+# Funzione per recuperare email utente da id
+def get_user_email(user_id):
+    user = get_user_by_id(user_id)
+    if user:
+        return user['email']
+    return "Utente"
+
+
 # ================================
 # DASHBOARD
 # ================================
 def show_dashboard():
+    user_email = get_user_email(st.session_state.user)
     st.title("💰 Gestione Spese e Risparmi")
-    st.write(f"👋 Benvenuto, utente **{st.session_state.user}**")
+    st.write(f"👋 Benvenuto, utente **{user_email}**")
 
     if st.button("Logout"):
         st.session_state.user = None
