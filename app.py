@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import locale
 from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti, get_user_by_id
 
 # --- Inizializza DB ---
@@ -10,6 +11,21 @@ init_db()
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# Funzione helper per formattare valuta in stile italiano
+def format_currency(value):
+    try:
+        locale.setlocale(locale.LC_ALL, 'it_IT.UTF-8')
+    except locale.Error:
+        # fallback se locale italiano non disponibile
+        return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    return locale.currency(value, grouping=True).replace("€", "€").strip()
+
+# Funzione per recuperare email da id utente
+def get_user_email(user_id):
+    user = get_user_by_id(user_id)
+    if user:
+        return user['email']
+    return "Utente"
 
 # ================================
 # LOGIN / REGISTRAZIONE
@@ -26,7 +42,7 @@ def show_login_page():
         if st.button("Accedi"):
             user_record = login_user(email, password)
             if user_record:
-                st.session_state.user = user_record['id']  # memorizza solo l'id utente
+                st.session_state.user = user_record['id']  # memorizza solo l'id
                 st.success("✅ Login effettuato con successo!")
                 st.rerun()
             else:
@@ -41,15 +57,6 @@ def show_login_page():
                 st.success("✅ Registrazione completata, ora puoi fare login")
             else:
                 st.error("⚠️ Email già registrata")
-
-
-# Funzione per recuperare email utente da id
-def get_user_email(user_id):
-    user = get_user_by_id(user_id)
-    if user:
-        return user['email']
-    return "Utente"
-
 
 # ================================
 # DASHBOARD
@@ -70,7 +77,6 @@ def show_dashboard():
     if df.empty:
         st.info("Nessun dato ancora inserito.")
     else:
-        # Conversione numerica importi
         df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
 
     # --- Form spese ---
@@ -90,33 +96,76 @@ def show_dashboard():
     if not df.empty:
         df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
 
-    # --- RIEPILOGO SPESE ---
+    # --- RIEPILOGO SPESE E ANDAMENTO MENSILE ---
     if not df.empty:
         st.header("📊 Riepilogo Spese")
         spese = df[df["tipo"] == "Spesa"].copy()
         if not spese.empty:
-            st.dataframe(spese[["data", "categoria", "importo"]])
-
+            spese["importo"] = pd.to_numeric(spese["importo"], errors="coerce")
             totale_spese = spese["importo"].sum()
-            st.metric("Totale Spese", f"{totale_spese:,.2f} €")
+            totale_spese_formatted = format_currency(totale_spese)
 
-            # Grafico a torta
+            st.dataframe(
+                spese[["data", "categoria", "importo"]].assign(
+                    importo=spese["importo"].apply(format_currency)
+                )
+            )
+
+            st.metric("Totale Spese", totale_spese_formatted)
+
             soglia_massima = 2500.0
-            restante = max(0, soglia_massima - totale_spese)
-            valori = [totale_spese, restante]
+            importo_da_mostrare = totale_spese if totale_spese <= soglia_massima else soglia_massima
+            restante = soglia_massima - importo_da_mostrare
+
+            valori = [importo_da_mostrare, restante]
             colori = ["#e74c3c", "#27ae60"]
 
+            percent_speso = (importo_da_mostrare / soglia_massima) * 100 if soglia_massima else 0
+            percent_disp = 100 - percent_speso
+
             st.subheader("📈 Andamento Mensile")
+
             fig, ax = plt.subplots()
+            fig.patch.set_alpha(0.0)
+            ax.patch.set_alpha(0.0)
+
             wedges, texts, autotexts = ax.pie(
                 valori,
                 colors=colori,
                 autopct='%1.1f%%',
+                pctdistance=1.1,
+                labeldistance=1.2,
                 startangle=90,
-                counterclock=False
+                counterclock=False,
+                wedgeprops={'edgecolor': 'white', 'linewidth': 2},
+                textprops={'color': 'black', 'weight': 'bold'}
             )
-            ax.axis("equal")
+
+            for text in texts:
+                text.set_text('')
+
+            ax.axis('equal')
             st.pyplot(fig)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.metric(
+                    label="Speso",
+                    value=f"{percent_speso:.1f}%",
+                    delta=-importo_da_mostrare,
+                    delta_color="normal"
+                )
+                st.caption(f"{format_currency(importo_da_mostrare)} € su {format_currency(soglia_massima)} €")
+
+            with col2:
+                st.metric(
+                    label="Disponibile",
+                    value=f"{percent_disp:.1f}%",
+                    delta=restante,
+                    delta_color="normal"
+                )
+                st.caption(f"{format_currency(restante)} € disponibile")
         else:
             st.info("Nessuna spesa registrata.")
 
@@ -138,9 +187,17 @@ def show_dashboard():
     st.header("💰 Riepilogo Risparmi")
     risp = df[df["tipo"] == "Risparmio"].copy()
     if not risp.empty:
-        st.dataframe(risp[["data", "categoria", "importo"]])
+        risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
         totale_risparmi = risp["importo"].sum()
-        st.metric("Saldo Risparmi", f"{totale_risparmi:,.2f} €")
+        totale_risparmi_formatted = format_currency(totale_risparmi)
+
+        st.dataframe(
+            risp[["data", "categoria", "importo"]].assign(
+                importo=risp["importo"].apply(format_currency)
+            )
+        )
+
+        st.metric("Saldo Risparmi", totale_risparmi_formatted)
 
         obiettivo_risparmio = 30000.0
         percentuale_raggiunta = totale_risparmi / obiettivo_risparmio * 100 if obiettivo_risparmio else 0
@@ -148,11 +205,10 @@ def show_dashboard():
         st.metric(
             label="Risparmio raggiunto",
             value=f"{percentuale_raggiunta:.1f}%",
-            delta=f"{totale_risparmi:,.2f} € su {obiettivo_risparmio:,.2f} €"
+            delta=f"{totale_risparmi_formatted} € su {format_currency(obiettivo_risparmio)} €"
         )
     else:
         st.info("Nessun risparmio registrato.")
-
 
 # ================================
 # ROUTING
