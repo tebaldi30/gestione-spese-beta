@@ -1,151 +1,137 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from utils.db import init_db, add_movimento, get_movimenti, register_user, login_user
+from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti
 
-# Inizializza DB (crea tabelle se non esistono)
+# --- Inizializza DB ---
 init_db()
 
-# ========================
-# --- LOGIN / REGISTRAZIONE
-# ========================
+# --- Stato sessione ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if not st.session_state.user:
-    st.title("🔑 Autenticazione")
 
-    menu = st.sidebar.selectbox("Menu", ["Login", "Registrati"])
-    if menu == "Login":
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
+# ================================
+# LOGIN / REGISTRAZIONE
+# ================================
+def show_login_page():
+    st.title("🔑 Gestione Spese - Login")
+
+    tab_login, tab_register = st.tabs(["Login", "Registrati"])
+
+    # --- LOGIN ---
+    with tab_login:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
         if st.button("Accedi"):
-            if login_user(email, password):
-                st.session_state.user = email
-                st.success("✅ Login effettuato!")
-                st.experimental_rerun()
+            user_id = login_user(email, password)
+            if user_id:
+                st.session_state.user = user_id
+                st.success("✅ Login effettuato con successo!")
+                st.rerun()
             else:
-                st.error("❌ Credenziali non valide")
-    elif menu == "Registrati":
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        if st.button("Crea account"):
-            if register_user(email, password):
-                st.success("✅ Registrazione completata, ora fai login")
+                st.error("❌ Email o password errati")
+
+    # --- REGISTRAZIONE ---
+    with tab_register:
+        new_email = st.text_input("Nuova Email", key="register_email")
+        new_password = st.text_input("Nuova Password", type="password", key="register_password")
+        if st.button("Registrati"):
+            if register_user(new_email, new_password):
+                st.success("✅ Registrazione completata, ora puoi fare login")
             else:
-                st.error("❌ Email già registrata")
-    st.stop()
+                st.error("⚠️ Email già registrata")
 
-# ========================
-# --- INTERFACCIA PRINCIPALE
-# ========================
-st.title("💰 Gestione Spese e Risparmi")
 
-# Carico i dati dal DB
-dati = get_movimenti(st.session_state.user)
-df = pd.DataFrame(dati)
+# ================================
+# DASHBOARD
+# ================================
+def show_dashboard():
+    st.title("💰 Gestione Spese e Risparmi")
+    st.write(f"👋 Benvenuto, utente **{st.session_state.user}**")
 
-# Pulizia numerica importi
-def clean_importo(series):
-    return pd.to_numeric(series, errors="coerce")
+    if st.button("Logout"):
+        st.session_state.user = None
+        st.rerun()
 
-def format_currency(value):
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    # --- Carica i dati dal DB ---
+    df = pd.DataFrame(get_movimenti(st.session_state.user))
 
-# --- Form spese ---
-st.subheader("➖ Aggiungi Spesa")
-with st.form("spese_form", clear_on_submit=True):
-    data_spesa = st.date_input("Data spesa")
-    tipo_spesa = st.text_input("Categoria (es. affitto, cibo, bollette)")
-    valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
-    submitted_spesa = st.form_submit_button("Aggiungi Spesa")
-    if submitted_spesa and valore_spesa > 0:
-        add_movimento(st.session_state.user, "Spesa", data_spesa, valore_spesa, tipo_spesa)
-        st.success("Spesa registrata!")
-        st.experimental_rerun()
-
-# --- Form risparmi ---
-st.subheader("💵 Gestione Risparmi")
-with st.form("risparmi_form", clear_on_submit=True):
-    data_risp = st.date_input("Data risparmio/prelievo")
-    tipo_risp = st.radio("Tipo movimento", ["Risparmio", "Prelievo"])
-    valore_risp = st.number_input("Importo (€)", min_value=0.0, step=1.0)
-    submitted_risp = st.form_submit_button("Registra Movimento")
-    if submitted_risp and valore_risp > 0:
-        if tipo_risp == "Prelievo":
-            valore_risp = -valore_risp
-        add_movimento(st.session_state.user, "Risparmio", data_risp, valore_risp, tipo_risp)
-        st.success(f"{tipo_risp} registrato!")
-        st.experimental_rerun()
-
-# ========================
-# --- RIEPILOGO SPESE
-# ========================
-if not df.empty:
-    st.header("📊 Riepilogo Spese")
-    spese = df[df["tipo"] == "Spesa"].copy()
-    if not spese.empty:
-        spese["Importo_num"] = clean_importo(spese["importo"])
-        spese["Importo_fmt"] = spese["Importo_num"].apply(format_currency)
-        st.dataframe(spese[["data", "categoria", "Importo_fmt"]])
-
-        totale_spese = spese["Importo_num"].sum()
-        st.metric("Totale Spese", format_currency(totale_spese) + " €")
-
-        soglia_massima = 2500.0
-        totale_spese_valore = totale_spese if totale_spese <= soglia_massima else soglia_massima
-        restante = soglia_massima - totale_spese_valore
-
-        valori = [totale_spese_valore, restante]
-        colori = ["#e74c3c", "#27ae60"]
-
-        percent_speso = (totale_spese_valore / soglia_massima) * 100 if soglia_massima else 0
-        percent_disp = 100 - percent_speso
-
-        st.subheader("📈 Andamento Mensile")
-        fig, ax = plt.subplots()
-        fig.patch.set_alpha(0.0)
-        ax.patch.set_alpha(0.0)
-
-        wedges, texts, autotexts = ax.pie(
-            valori,
-            colors=colori,
-            autopct='%1.1f%%',
-            pctdistance=1.1,
-            labeldistance=1.2,
-            startangle=90,
-            counterclock=False,
-            wedgeprops={'edgecolor': 'white', 'linewidth': 2},
-            textprops={'color': 'black', 'weight': 'bold'}
-        )
-
-        for text in texts:
-            text.set_text('')
-
-        ax.axis('equal')
-        st.pyplot(fig)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Speso", f"{percent_speso:.1f}%", delta=-totale_spese_valore)
-        with col2:
-            st.metric("Disponibile", f"{percent_disp:.1f}%", delta=restante)
-
+    # Se non ci sono dati ancora
+    if df.empty:
+        st.info("Nessun dato ancora inserito.")
     else:
-        st.info("Nessuna spesa registrata.")
+        # Conversione numerica importi
+        df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
 
-    # ========================
-    # --- RIEPILOGO RISPARMI
-    # ========================
+    # --- Form spese ---
+    st.subheader("➖ Aggiungi Spesa")
+    with st.form("spese_form", clear_on_submit=True):
+        data_spesa = st.date_input("Data spesa")
+        tipo_spesa = st.text_input("Categoria (es. affitto, cibo, bollette)")
+        valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
+        submitted_spesa = st.form_submit_button("Aggiungi Spesa")
+        if submitted_spesa and valore_spesa > 0:
+            add_movimento(st.session_state.user, "Spesa", data_spesa, valore_spesa, tipo_spesa)
+            st.success("Spesa registrata!")
+            st.rerun()
+
+    # --- Aggiorna dati ---
+    df = pd.DataFrame(get_movimenti(st.session_state.user))
+    if not df.empty:
+        df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
+
+    # --- RIEPILOGO SPESE ---
+    if not df.empty:
+        st.header("📊 Riepilogo Spese")
+        spese = df[df["tipo"] == "Spesa"].copy()
+        if not spese.empty:
+            st.dataframe(spese[["data", "categoria", "importo"]])
+
+            totale_spese = spese["importo"].sum()
+            st.metric("Totale Spese", f"{totale_spese:,.2f} €")
+
+            # Grafico a torta
+            soglia_massima = 2500.0
+            restante = max(0, soglia_massima - totale_spese)
+            valori = [totale_spese, restante]
+            colori = ["#e74c3c", "#27ae60"]
+
+            st.subheader("📈 Andamento Mensile")
+            fig, ax = plt.subplots()
+            wedges, texts, autotexts = ax.pie(
+                valori,
+                colors=colori,
+                autopct='%1.1f%%',
+                startangle=90,
+                counterclock=False
+            )
+            ax.axis("equal")
+            st.pyplot(fig)
+        else:
+            st.info("Nessuna spesa registrata.")
+
+    # --- Form risparmi ---
+    st.subheader("💵 Gestione Risparmi")
+    with st.form("risparmi_form", clear_on_submit=True):
+        data_risp = st.date_input("Data risparmio/prelievo")
+        tipo_risp = st.radio("Tipo movimento", ["Risparmio", "Prelievo"])
+        valore_risp = st.number_input("Importo (€)", min_value=0.0, step=1.0)
+        submitted_risp = st.form_submit_button("Registra Movimento")
+        if submitted_risp and valore_risp > 0:
+            if tipo_risp == "Prelievo":
+                valore_risp = -valore_risp
+            add_movimento(st.session_state.user, "Risparmio", data_risp, valore_risp, tipo_risp)
+            st.success(f"{tipo_risp} registrato!")
+            st.rerun()
+
+    # --- RIEPILOGO RISPARMI ---
     st.header("💰 Riepilogo Risparmi")
     risp = df[df["tipo"] == "Risparmio"].copy()
     if not risp.empty:
-        risp["Importo_num"] = clean_importo(risp["importo"])
-        risp["Importo_fmt"] = risp["Importo_num"].apply(format_currency)
-        st.dataframe(risp[["data", "categoria", "Importo_fmt"]])
-
-        totale_risparmi = risp["Importo_num"].sum()
-        st.metric("Saldo Risparmi", format_currency(totale_risparmi) + " €")
+        st.dataframe(risp[["data", "categoria", "importo"]])
+        totale_risparmi = risp["importo"].sum()
+        st.metric("Saldo Risparmi", f"{totale_risparmi:,.2f} €")
 
         obiettivo_risparmio = 30000.0
         percentuale_raggiunta = totale_risparmi / obiettivo_risparmio * 100 if obiettivo_risparmio else 0
@@ -153,9 +139,16 @@ if not df.empty:
         st.metric(
             label="Risparmio raggiunto",
             value=f"{percentuale_raggiunta:.1f}%",
-            delta=f"{format_currency(totale_risparmi)} € su {format_currency(obiettivo_risparmio)} €"
+            delta=f"{totale_risparmi:,.2f} € su {obiettivo_risparmio:,.2f} €"
         )
     else:
         st.info("Nessun risparmio registrato.")
+
+
+# ================================
+# ROUTING
+# ================================
+if st.session_state.user is None:
+    show_login_page()
 else:
-    st.info("Nessun dato ancora inserito.")
+    show_dashboard()
