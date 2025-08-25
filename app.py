@@ -66,6 +66,20 @@ def show_dashboard():
     st.title("💰 Gestione Spese e Risparmi")
     st.write(f"👋 Benvenuto, utente **{user_email}**")
 
+    # 👇 Link WhatsApp sotto al benvenuto
+    st.markdown(
+        """
+        <p style="margin-top:10px;font-size:16px;">
+            Vuoi registrare le tue spese più velocemente?<br>
+            <a href="https://wa.me/5519998882067" target="_blank" 
+               style="color:#25D366; font-weight:bold; text-decoration:none;">
+               📲 Registra le tue spese tramite WhatsApp, clicca qui!
+            </a>
+        </p>
+        """,
+        unsafe_allow_html=True
+    )
+
     if st.button("Logout"):
         st.session_state.user = None
         st.rerun()
