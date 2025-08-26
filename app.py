@@ -29,26 +29,23 @@ COOKIE_KEY = os.getenv("AUTH_COOKIE_KEY", "supersecret_key_change_me")
 COOKIE_EXPIRY_DAYS = int(os.getenv("AUTH_COOKIE_EXPIRY_DAYS", "30"))
 
 def build_authenticator():
-    """
-    Carica utenti dal DB e prepara l'auth con cookie persistente.
-    Ritorna (authenticator, email_to_id)
-    """
-    users = list_users()  # [{'id':..,'email':..,'password':..}, ...]
-    # streamlit-authenticator (API classica) richiede tre liste
-    names = [u["email"] for u in users]         # usiamo l'email anche come "name"
-    usernames = [u["email"] for u in users]     # username = email
-    hashed_pw = [u["password"] for u in users]  # deve essere bcrypt hash (già nel DB)
-
-    email_to_id = {u["email"]: u["id"] for u in users}
+    users = list_users()  # lista di dict
+    credentials = {
+        "usernames": {}
+    }
+    for u in users:
+        credentials["usernames"][u["email"]] = {
+            "name": u["email"],         # o il nome da visualizzare
+            "password": u["password"],  # password hash
+        }
 
     authenticator = stauth.Authenticate(
-        names,
-        usernames,
-        hashed_pw,
-        COOKIE_NAME,
-        COOKIE_KEY,
-        COOKIE_EXPIRY_DAYS,
+        credentials,
+        cookie_name=COOKIE_NAME,
+        key=COOKIE_KEY,
+        expiry_days=COOKIE_EXPIRY_DAYS,
     )
+    email_to_id = {u["email"]: u["id"] for u in users}
     return authenticator, email_to_id
 
 # Funzione helper per formattare valuta in stile italiano
@@ -275,4 +272,5 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
 
