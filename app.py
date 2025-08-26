@@ -11,34 +11,31 @@ from utils.db import (
     add_movimento,
     get_movimenti,
     get_user_by_id,
-    list_users,   # <-- piccola aggiunta nel DB (vedi sotto)
+    list_users,
 )
 
 # --- Inizializza DB ---
 init_db()
 
-# --- Stato sessione (compat con tuo codice) ---
+# --- Stato sessione ---
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
 
-# --- Config cookie per streamlit-authenticator ---
+# --- Config cookie ---
 COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "gs_auth")
 COOKIE_KEY = os.getenv("AUTH_COOKIE_KEY", "supersecret_key_change_me")
 COOKIE_EXPIRY_DAYS = int(os.getenv("AUTH_COOKIE_EXPIRY_DAYS", "30"))
 
 def build_authenticator():
-    users = list_users()  # lista di dict
-    credentials = {
-        "usernames": {}
-    }
+    users = list_users()
+    credentials = {"usernames": {}}
     for u in users:
         credentials["usernames"][u["email"]] = {
-            "name": u["email"],         # o il nome da visualizzare
-            "password": u["password"],  # password hash
+            "name": u["email"],
+            "password": u["password"],
         }
-
     authenticator = stauth.Authenticate(
         credentials,
         cookie_name=COOKIE_NAME,
@@ -48,7 +45,7 @@ def build_authenticator():
     email_to_id = {u["email"]: u["id"] for u in users}
     return authenticator, email_to_id
 
-# Funzione helper per formattare valuta in stile italiano
+# --- Helper valuta ---
 def format_currency(value):
     try:
         locale.setlocale(locale.LC_ALL, 'it_IT.UTF-8')
@@ -56,7 +53,7 @@ def format_currency(value):
         return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
     return locale.currency(value, grouping=True).replace("€", "€").strip()
 
-# Funzione per recuperare email da id utente
+# --- Recupera email utente ---
 def get_user_email(user_id):
     user = get_user_by_id(user_id)
     if user:
@@ -71,15 +68,14 @@ def show_login_page():
 
     tab_login, tab_register = st.tabs(["Login", "Registrati"])
 
-    # --- LOGIN (usiamo streamlit-authenticator) ---
+    # --- LOGIN ---
     with tab_login:
         authenticator, email_to_id = build_authenticator()
-        name, auth_status, username = authenticator.login(location="main", key="login")
+        auth_status = authenticator.login(location="main", key="login")
 
         if auth_status:
-            # username è l'email
             st.session_state.is_logged_in = True
-            st.session_state.user_id = email_to_id.get(username)
+            st.session_state.user_id = email_to_id.get(authenticator.username)
             st.success("✅ Login effettuato con successo!")
             st.rerun()
         elif auth_status is False:
@@ -87,7 +83,7 @@ def show_login_page():
         else:
             st.info("Inserisci le credenziali per accedere.")
 
-    # --- REGISTRAZIONE (DB) ---
+    # --- REGISTRAZIONE ---
     with tab_register:
         new_email = st.text_input("Nuova Email", key="register_email")
         new_password = st.text_input("Nuova Password", type="password", key="register_password")
@@ -100,7 +96,7 @@ def show_login_page():
                 ok = register_user(new_email, new_password, new_phone)
                 if ok:
                     st.success("✅ Registrazione completata, ora puoi fare login")
-                    st.rerun()  # rigenera le credenziali per il login
+                    st.rerun()
                 else:
                     st.error("⚠️ Email già registrata")
 
@@ -112,7 +108,7 @@ def show_dashboard():
     st.title("💰 Gestione Spese e Risparmi")
     st.write(f"👋 Benvenuto, utente **{user_email}**")
 
-    # --- Link a WhatsApp Bot ---
+    # --- Link WhatsApp ---
     whatsapp_number = "+5519998882067"
     whatsapp_url = f"https://wa.me/{whatsapp_number.replace('+','')}"
     st.markdown(
@@ -121,16 +117,15 @@ def show_dashboard():
         unsafe_allow_html=True
     )
 
-    # --- Logout via streamlit-authenticator (pulisce cookie) ---
+    # --- Logout ---
     authenticator, _ = build_authenticator()
     authenticator.logout("Logout", location="main", key="logout")
-    # Pulizia stato locale per coerenza
     if st.session_state.get("authentication_status") is None and st.session_state.is_logged_in:
         st.session_state.is_logged_in = False
         st.session_state.user_id = None
         st.rerun()
 
-    # --- Carica i dati dal DB ---
+    # --- Carica dati DB ---
     df = pd.DataFrame(get_movimenti(st.session_state.user_id))
     has_data = not df.empty and "tipo" in df.columns
     if has_data:
@@ -152,7 +147,7 @@ def show_dashboard():
         st.info("Nessun dato ancora inserito.")
         return
 
-    # --- RIEPILOGO SPESE ---
+    # --- Riepilogo spese ---
     spese = df[df["tipo"] == "Spesa"].copy()
     if not spese.empty:
         spese["importo"] = pd.to_numeric(spese["importo"], errors="coerce")
@@ -238,7 +233,7 @@ def show_dashboard():
             st.success(f"{tipo_risp} registrato!")
             st.rerun()
 
-    # --- RIEPILOGO RISPARMI ---
+    # --- Riepilogo risparmi ---
     risp = df[df["tipo"] == "Risparmio"].copy()
     if not risp.empty:
         risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
@@ -272,10 +267,3 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
-
-
-
-
-
-
-
