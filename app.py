@@ -8,14 +8,17 @@ from utils.db import init_db, register_user, login_user, add_movimento, get_movi
 init_db()
 
 # --- Stato sessione ---
-if "user" not in st.session_state:
-    st.session_state.user = None
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
 
 # Funzione helper per formattare valuta in stile italiano
 def format_currency(value):
     try:
         locale.setlocale(locale.LC_ALL, 'it_IT.UTF-8')
     except locale.Error:
+        # fallback se locale italiano non disponibile
         return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
     return locale.currency(value, grouping=True).replace("€", "€").strip()
 
@@ -25,13 +28,6 @@ def get_user_email(user_id):
     if user:
         return user['email']
     return "Utente"
-
-# Funzione per recuperare telefono da id utente
-def get_user_phone(user_id):
-    user = get_user_by_id(user_id)
-    if user and "phone" in user:
-        return user["phone"]
-    return None
 
 # ================================
 # LOGIN / REGISTRAZIONE
@@ -48,7 +44,8 @@ def show_login_page():
         if st.button("Accedi"):
             user_record = login_user(email, password)
             if user_record:
-                st.session_state.user = user_record['id']
+                st.session_state.is_logged_in = True
+                st.session_state.user_id = user_record['id']
                 st.success("✅ Login effettuato con successo!")
                 st.rerun()
             else:
@@ -58,43 +55,36 @@ def show_login_page():
     with tab_register:
         new_email = st.text_input("Nuova Email", key="register_email")
         new_password = st.text_input("Nuova Password", type="password", key="register_password")
-        new_phone = st.text_input("Numero WhatsApp (es. +393491234567)", key="register_phone")
-
         if st.button("Registrati"):
-            if not new_email or not new_password or not new_phone:
-                st.error("⚠️ Tutti i campi sono obbligatori (email, password, telefono).")
+            if register_user(new_email, new_password):
+                st.success("✅ Registrazione completata, ora puoi fare login")
             else:
-                if register_user(new_email, new_password, new_phone):
-                    st.success("✅ Registrazione completata, ora puoi fare login")
-                else:
-                    st.error("⚠️ Email già registrata")
+                st.error("⚠️ Email già registrata")
 
 # ================================
 # DASHBOARD
 # ================================
 def show_dashboard():
-    user_email = get_user_email(st.session_state.user)
-    user_phone = get_user_phone(st.session_state.user)
-
+    user_email = get_user_email(st.session_state.user_id)
     st.title("💰 Gestione Spese e Risparmi")
     st.write(f"👋 Benvenuto, utente **{user_email}**")
 
-    # --- Link WhatsApp ---
-    whatsapp_number = "+5519998882067"  # numero del tuo bot
-    whatsapp_link = f"https://wa.me/{whatsapp_number.replace('+','')}"
+    # --- Link a WhatsApp Bot ---
+    whatsapp_number = "+5519998882067"
+    whatsapp_url = f"https://wa.me/{whatsapp_number}"
     st.markdown(
-        f'<a href="{whatsapp_link}" target="_blank" style="text-decoration:none;">'
-        f'<img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" '
-        f'width="20"/> <b>Registra le tue spese tramite WhatsApp, clicca qui!</b></a>',
+        f'<p style="font-size:16px;">📲 Vuoi registrare le spese anche da WhatsApp? '
+        f'<a href="{whatsapp_url}" target="_blank"><b>Clicca qui!</b></a></p>',
         unsafe_allow_html=True
     )
 
     if st.button("Logout"):
-        st.session_state.user = None
+        st.session_state.is_logged_in = False
+        st.session_state.user_id = None
         st.rerun()
 
     # --- Carica i dati dal DB ---
-    df = pd.DataFrame(get_movimenti(st.session_state.user))
+    df = pd.DataFrame(get_movimenti(st.session_state.user_id))
     has_data = not df.empty and "tipo" in df.columns
     if has_data:
         df["importo"] = pd.to_numeric(df["importo"], errors="coerce")
@@ -107,7 +97,7 @@ def show_dashboard():
         valore_spesa = st.number_input("Importo (€)", min_value=0.0, step=1.0)
         submitted_spesa = st.form_submit_button("Aggiungi Spesa")
         if submitted_spesa and valore_spesa > 0:
-            add_movimento(st.session_state.user, "Spesa", data_spesa, valore_spesa, tipo_spesa)
+            add_movimento(st.session_state.user_id, "Spesa", data_spesa, valore_spesa, tipo_spesa)
             st.success("Spesa registrata!")
             st.rerun()
 
@@ -128,11 +118,11 @@ def show_dashboard():
                 importo=spese["importo"].apply(format_currency)
             )
         )
+
         st.metric("Totale Spese", totale_spese_formatted)
 
-        # --- grafico spese ---
         soglia_massima = 2500.0
-        importo_da_mostrare = min(totale_spese, soglia_massima)
+        importo_da_mostrare = totale_spese if totale_spese <= soglia_massima else soglia_massima
         restante = soglia_massima - importo_da_mostrare
 
         valori = [importo_da_mostrare, restante]
@@ -166,17 +156,28 @@ def show_dashboard():
         st.pyplot(fig)
 
         col1, col2 = st.columns(2)
+
         with col1:
-            st.metric("Speso", f"{percent_speso:.1f}%", delta=-importo_da_mostrare)
+            st.metric(
+                label="Speso",
+                value=f"{percent_speso:.1f}%",
+                delta=-importo_da_mostrare,
+                delta_color="normal"
+            )
             st.caption(f"{format_currency(importo_da_mostrare)} € su {format_currency(soglia_massima)} €")
 
         with col2:
-            st.metric("Disponibile", f"{percent_disp:.1f}%", delta=restante)
+            st.metric(
+                label="Disponibile",
+                value=f"{percent_disp:.1f}%",
+                delta=restante,
+                delta_color="normal"
+            )
             st.caption(f"{format_currency(restante)} € disponibile")
     else:
         st.info("Nessuna spesa registrata.")
 
-    # --- RISPARMI ---
+    # --- Form risparmi ---
     st.subheader("💵 Gestione Risparmi")
     with st.form("risparmi_form", clear_on_submit=True):
         data_risp = st.date_input("Data risparmio/prelievo")
@@ -186,10 +187,11 @@ def show_dashboard():
         if submitted_risp and valore_risp > 0:
             if tipo_risp == "Prelievo":
                 valore_risp = -valore_risp
-            add_movimento(st.session_state.user, "Risparmio", data_risp, valore_risp, tipo_risp)
+            add_movimento(st.session_state.user_id, "Risparmio", data_risp, valore_risp, tipo_risp)
             st.success(f"{tipo_risp} registrato!")
             st.rerun()
 
+    # --- RIEPILOGO RISPARMI ---
     risp = df[df["tipo"] == "Risparmio"].copy()
     if not risp.empty:
         risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
@@ -202,6 +204,7 @@ def show_dashboard():
                 importo=risp["importo"].apply(format_currency)
             )
         )
+
         st.metric("Saldo Risparmi", totale_risparmi_formatted)
 
         obiettivo_risparmio = 30000.0
@@ -218,7 +221,7 @@ def show_dashboard():
 # ================================
 # ROUTING
 # ================================
-if st.session_state.user is None:
-    show_login_page()
-else:
+if st.session_state.is_logged_in:
     show_dashboard()
+else:
+    show_login_page()
