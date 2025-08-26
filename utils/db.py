@@ -14,7 +14,6 @@ def get_connection():
 def init_db():
     conn = get_connection()
     cur = conn.cursor()
-
     # Tabella utenti
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -24,7 +23,6 @@ def init_db():
             telefono TEXT UNIQUE
         );
     """)
-
     # Tabella movimenti
     cur.execute("""
         CREATE TABLE IF NOT EXISTS movimenti (
@@ -36,7 +34,6 @@ def init_db():
             categoria VARCHAR(100)
         );
     """)
-
     conn.commit()
     cur.close()
     conn.close()
@@ -120,6 +117,17 @@ def get_movimenti(user_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM movimenti WHERE user_id = %s ORDER BY data DESC;", (user_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+# --- Lista degli utenti ---
+def list_users():
+    """Ritorna lista di dict: [{'id':.., 'email':.., 'password':.., 'phone':..}, ...]"""
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT id, email, password, telefono FROM users;")
     rows = cur.fetchall()
     cur.close()
     conn.close()
