@@ -2,23 +2,59 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import locale
-from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti, get_user_by_id
+import streamlit_authenticator as stauth
+
+from utils.db import (
+    init_db,
+    register_user,
+    add_movimento,
+    get_movimenti,
+    get_user_by_id,
+    list_users,   # <-- piccola aggiunta nel DB (vedi sotto)
+)
 
 # --- Inizializza DB ---
 init_db()
 
-# --- Stato sessione ---
+# --- Stato sessione (compat con tuo codice) ---
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
+
+# --- Config cookie per streamlit-authenticator ---
+COOKIE_NAME = st.secrets.get("AUTH_COOKIE_NAME", "gs_auth")
+COOKIE_KEY = st.secrets.get("AUTH_COOKIE_KEY", "supersecret_key_change_me")
+COOKIE_EXPIRY_DAYS = int(st.secrets.get("AUTH_COOKIE_EXPIRY_DAYS", 30))
+
+def build_authenticator():
+    """
+    Carica utenti dal DB e prepara l'auth con cookie persistente.
+    Ritorna (authenticator, email_to_id)
+    """
+    users = list_users()  # [{'id':..,'email':..,'password':..}, ...]
+    # streamlit-authenticator (API classica) richiede tre liste
+    names = [u["email"] for u in users]         # usiamo l'email anche come "name"
+    usernames = [u["email"] for u in users]     # username = email
+    hashed_pw = [u["password"] for u in users]  # deve essere bcrypt hash (già nel DB)
+
+    email_to_id = {u["email"]: u["id"] for u in users}
+
+    authenticator = stauth.Authenticate(
+        names,
+        usernames,
+        hashed_pw,
+        COOKIE_NAME,
+        COOKIE_KEY,
+        COOKIE_EXPIRY_DAYS,
+    )
+    return authenticator, email_to_id
 
 # Funzione helper per formattare valuta in stile italiano
 def format_currency(value):
     try:
         locale.setlocale(locale.LC_ALL, 'it_IT.UTF-8')
     except locale.Error:
-        # fallback se locale italiano non disponibile
         return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
     return locale.currency(value, grouping=True).replace("€", "€").strip()
 
@@ -33,33 +69,42 @@ def get_user_email(user_id):
 # LOGIN / REGISTRAZIONE
 # ================================
 def show_login_page():
-    st.title("🔑 Gestione Spese - Login")
+    st.title("🔑 Gestione Spese")
 
     tab_login, tab_register = st.tabs(["Login", "Registrati"])
 
-    # --- LOGIN ---
+    # --- LOGIN (usiamo streamlit-authenticator) ---
     with tab_login:
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Accedi"):
-            user_record = login_user(email, password)
-            if user_record:
-                st.session_state.is_logged_in = True
-                st.session_state.user_id = user_record['id']
-                st.success("✅ Login effettuato con successo!")
-                st.rerun()
-            else:
-                st.error("❌ Email o password errati")
+        authenticator, email_to_id = build_authenticator()
+        name, auth_status, username = authenticator.login("Accedi", "main")
 
-    # --- REGISTRAZIONE ---
+        if auth_status:
+            # username è l'email
+            st.session_state.is_logged_in = True
+            st.session_state.user_id = email_to_id.get(username)
+            st.success("✅ Login effettuato con successo!")
+            st.rerun()
+        elif auth_status is False:
+            st.error("❌ Email o password errati")
+        else:
+            st.info("Inserisci le credenziali per accedere.")
+
+    # --- REGISTRAZIONE (DB) ---
     with tab_register:
         new_email = st.text_input("Nuova Email", key="register_email")
         new_password = st.text_input("Nuova Password", type="password", key="register_password")
+        new_phone = st.text_input("Numero WhatsApp (es. +393491234567)", key="register_phone")
+
         if st.button("Registrati"):
-            if register_user(new_email, new_password):
-                st.success("✅ Registrazione completata, ora puoi fare login")
+            if not new_email or not new_password or not new_phone:
+                st.error("⚠️ Tutti i campi sono obbligatori (email, password, telefono).")
             else:
-                st.error("⚠️ Email già registrata")
+                ok = register_user(new_email, new_password, new_phone)
+                if ok:
+                    st.success("✅ Registrazione completata, ora puoi fare login")
+                    st.rerun()  # rigenera le credenziali per il login
+                else:
+                    st.error("⚠️ Email già registrata")
 
 # ================================
 # DASHBOARD
@@ -71,14 +116,18 @@ def show_dashboard():
 
     # --- Link a WhatsApp Bot ---
     whatsapp_number = "+5519998882067"
-    whatsapp_url = f"https://wa.me/{whatsapp_number}"
+    whatsapp_url = f"https://wa.me/{whatsapp_number.replace('+','')}"
     st.markdown(
         f'<p style="font-size:16px;">📲 Vuoi registrare le spese anche da WhatsApp? '
         f'<a href="{whatsapp_url}" target="_blank"><b>Clicca qui!</b></a></p>',
         unsafe_allow_html=True
     )
 
-    if st.button("Logout"):
+    # --- Logout via streamlit-authenticator (pulisce cookie) ---
+    authenticator, _ = build_authenticator()
+    authenticator.logout("Logout", "main")
+    # Pulizia stato locale per coerenza
+    if st.session_state.get("authentication_status") is None and st.session_state.is_logged_in:
         st.session_state.is_logged_in = False
         st.session_state.user_id = None
         st.rerun()
