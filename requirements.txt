@@ -4,3 +4,5 @@ matplotlib
 sqlalchemy
 psycopg2-binary
 werkzeug
+bcrypt
+streamlit-authenticator
