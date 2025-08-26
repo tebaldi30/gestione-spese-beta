@@ -74,7 +74,7 @@ def show_login_page():
     # --- LOGIN (usiamo streamlit-authenticator) ---
     with tab_login:
         authenticator, email_to_id = build_authenticator()
-        name, auth_status, username = authenticator.login("Accedi", "main")
+        name, auth_status, username = authenticator.login("Accedi", location="main")
 
         if auth_status:
             # username è l'email
@@ -272,5 +272,6 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
 
 
