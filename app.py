@@ -70,19 +70,21 @@ def show_login_page():
 
     # --- LOGIN ---
     with tab_login:
-        authenticator, email_to_id = build_authenticator()
-        name, auth_status, username = authenticator.login(location="main", key="login")
+    authenticator, email_to_id = build_authenticator()
+    # Login semplice senza unpacking
+    authenticator.login(location="main", key="login")
 
-        if auth_status:
-            st.session_state.is_logged_in = True
-            st.session_state.user_id = email_to_id.get(username)
-            st.success(f"✅ Login effettuato con successo! Benvenuto {username}")
-            st.rerun()
-        elif auth_status is False:
-            st.error("❌ Email o password errati")
-        else:
-            st.info("Inserisci le credenziali per accedere.")
-
+    # Leggiamo lo stato dai cookie / session_state
+    if st.session_state.get("authentication_status"):
+        st.session_state.is_logged_in = True
+        st.session_state.user_id = email_to_id.get(st.session_state.get("name"))
+        st.success(f"✅ Login effettuato con successo! Benvenuto {st.session_state.get('name')}")
+        st.rerun()
+    elif st.session_state.get("authentication_status") is False:
+        st.error("❌ Email o password errati")
+    else:
+        st.info("Inserisci le credenziali per accedere.")
+        
     # --- REGISTRAZIONE ---
     with tab_register:
         new_email = st.text_input("Nuova Email", key="register_email")
@@ -267,4 +269,5 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
 
