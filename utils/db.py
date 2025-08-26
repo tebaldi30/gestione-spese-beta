@@ -43,6 +43,7 @@ def init_db():
 
 # --- Gestione utenti ---
 def register_user(email, password, telefono=None):
+    """Registra un nuovo utente con email, password (hashed) e telefono opzionale"""
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -54,14 +55,16 @@ def register_user(email, password, telefono=None):
         user_id = cur.fetchone()["id"]
         conn.commit()
         return user_id
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        print("Errore registrazione:", e)
         return None
     finally:
         cur.close()
         conn.close()
 
 def login_user(email, password):
+    """Verifica credenziali di accesso"""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE email = %s;", (email,))
