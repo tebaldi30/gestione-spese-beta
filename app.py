@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -23,9 +24,9 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = None
 
 # --- Config cookie per streamlit-authenticator ---
-COOKIE_NAME = st.secrets.get("AUTH_COOKIE_NAME", "gs_auth")
-COOKIE_KEY = st.secrets.get("AUTH_COOKIE_KEY", "supersecret_key_change_me")
-COOKIE_EXPIRY_DAYS = int(st.secrets.get("AUTH_COOKIE_EXPIRY_DAYS", 30))
+COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "gs_auth")
+COOKIE_KEY = os.getenv("AUTH_COOKIE_KEY", "supersecret_key_change_me")
+COOKIE_EXPIRY_DAYS = int(os.getenv("AUTH_COOKIE_EXPIRY_DAYS", "30"))
 
 def build_authenticator():
     """
@@ -274,3 +275,4 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
