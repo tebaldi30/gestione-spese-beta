@@ -3,17 +3,18 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# --- Connessione al DB usando DATABASE_URL ---
+# --- Connessione al DB ---
 def get_connection():
     return psycopg2.connect(
         os.getenv("DATABASE_URL"),
         cursor_factory=RealDictCursor
     )
 
-# --- Creazione tabelle se non esistono ---
+# --- Creazione tabelle ---
 def init_db():
     conn = get_connection()
     cur = conn.cursor()
+
     # Tabella utenti
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -23,45 +24,43 @@ def init_db():
             telefono TEXT UNIQUE
         );
     """)
+
     # Tabella movimenti
     cur.execute("""
         CREATE TABLE IF NOT EXISTS movimenti (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            user_id INTEGER REFERENCES users(id),
             tipo VARCHAR(50) NOT NULL,
             data DATE NOT NULL,
             importo NUMERIC(10,2) NOT NULL,
             categoria VARCHAR(100)
         );
     """)
+
     conn.commit()
     cur.close()
     conn.close()
 
 # --- Gestione utenti ---
 def register_user(email, password, telefono=None):
-    """Registra un nuovo utente con email, password (hashed) e telefono opzionale"""
     conn = get_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
             INSERT INTO users (email, password, telefono)
-            VALUES (%s, %s, %s)
-            RETURNING id;
+            VALUES (%s, %s, %s) RETURNING id;
         """, (email, generate_password_hash(password), telefono))
         user_id = cur.fetchone()["id"]
         conn.commit()
         return user_id
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        print("Errore registrazione:", e)
         return None
     finally:
         cur.close()
         conn.close()
 
 def login_user(email, password):
-    """Verifica credenziali di accesso"""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE email = %s;", (email,))
@@ -72,7 +71,6 @@ def login_user(email, password):
         return user
     return None
 
-# --- Recupera utente da id ---
 def get_user_by_id(user_id):
     conn = get_connection()
     cur = conn.cursor()
@@ -81,25 +79,6 @@ def get_user_by_id(user_id):
     cur.close()
     conn.close()
     return user
-
-# --- Recupera utente da telefono (per WhatsApp bot) ---
-def get_user_by_phone(telefono):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, email, telefono FROM users WHERE telefono = %s;", (telefono,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-    return user
-
-# --- Aggiorna numero di telefono ---
-def update_user_phone(user_id, telefono):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET telefono = %s WHERE id = %s;", (telefono, user_id))
-    conn.commit()
-    cur.close()
-    conn.close()
 
 # --- Gestione movimenti ---
 def add_movimento(user_id, tipo, data, importo, categoria):
@@ -117,17 +96,6 @@ def get_movimenti(user_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM movimenti WHERE user_id = %s ORDER BY data DESC;", (user_id,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
-
-# --- Lista degli utenti ---
-def list_users():
-    """Ritorna lista di dict: [{'id':.., 'email':.., 'password':.., 'phone':..}, ...]"""
-    conn = get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT id, email, password, telefono FROM users;")
     rows = cur.fetchall()
     cur.close()
     conn.close()
