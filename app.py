@@ -74,7 +74,7 @@ def show_login_page():
     # --- LOGIN (usiamo streamlit-authenticator) ---
     with tab_login:
         authenticator, email_to_id = build_authenticator()
-        name, auth_status, username = authenticator.login("Accedi", location="main")
+        name, auth_status, username = authenticator.login(location="main", key="login")
 
         if auth_status:
             # username è l'email
@@ -123,7 +123,7 @@ def show_dashboard():
 
     # --- Logout via streamlit-authenticator (pulisce cookie) ---
     authenticator, _ = build_authenticator()
-    authenticator.logout("Logout", location="main")
+    authenticator.logout("Logout", location="main", key="logout")
     # Pulizia stato locale per coerenza
     if st.session_state.get("authentication_status") is None and st.session_state.is_logged_in:
         st.session_state.is_logged_in = False
@@ -272,6 +272,7 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
 
 
 
