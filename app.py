@@ -1,18 +1,8 @@
-import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import locale
-import streamlit_authenticator as stauth
-
-from utils.db import (
-    init_db,
-    register_user,
-    add_movimento,
-    get_movimenti,
-    get_user_by_id,
-    list_users,
-)
+from utils.db import init_db, register_user, login_user, add_movimento, get_movimenti, get_user_by_id
 
 # --- Inizializza DB ---
 init_db()
@@ -23,37 +13,16 @@ if "is_logged_in" not in st.session_state:
 if "user_id" not in st.session_state:
     st.session_state.user_id = None
 
-# --- Config cookie ---
-COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "gs_auth")
-COOKIE_KEY = os.getenv("AUTH_COOKIE_KEY", "supersecret_key_change_me")
-COOKIE_EXPIRY_DAYS = int(os.getenv("AUTH_COOKIE_EXPIRY_DAYS", "30"))
-
-def build_authenticator():
-    users = list_users()
-    credentials = {"usernames": {}}
-    for u in users:
-        credentials["usernames"][u["email"]] = {
-            "name": u["email"],
-            "password": u["password"],
-        }
-    authenticator = stauth.Authenticate(
-        credentials,
-        cookie_name=COOKIE_NAME,
-        key=COOKIE_KEY,
-        expiry_days=COOKIE_EXPIRY_DAYS,
-    )
-    email_to_id = {u["email"]: u["id"] for u in users}
-    return authenticator, email_to_id
-
-# --- Helper valuta ---
+# Funzione helper per formattare valuta in stile italiano
 def format_currency(value):
     try:
         locale.setlocale(locale.LC_ALL, 'it_IT.UTF-8')
     except locale.Error:
+        # fallback se locale italiano non disponibile
         return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
     return locale.currency(value, grouping=True).replace("€", "€").strip()
 
-# --- Recupera email utente ---
+# Funzione per recuperare email da id utente
 def get_user_email(user_id):
     user = get_user_by_id(user_id)
     if user:
@@ -64,42 +33,33 @@ def get_user_email(user_id):
 # LOGIN / REGISTRAZIONE
 # ================================
 def show_login_page():
-    st.title("🔑 Gestione Spese")
+    st.title("🔑 Gestione Spese - Login")
 
     tab_login, tab_register = st.tabs(["Login", "Registrati"])
 
     # --- LOGIN ---
     with tab_login:
-        authenticator, email_to_id = build_authenticator()
-        authenticator.login(location="main", key="login")
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Accedi"):
+            user_record = login_user(email, password)
+            if user_record:
+                st.session_state.is_logged_in = True
+                st.session_state.user_id = user_record['id']
+                st.success("✅ Login effettuato con successo!")
+                st.rerun()
+            else:
+                st.error("❌ Email o password errati")
 
-        if st.session_state.get("authentication_status"):
-            st.session_state.is_logged_in = True
-            st.session_state.user_id = email_to_id.get(st.session_state.get("name"))
-            st.success(f"✅ Login effettuato con successo! Benvenuto {st.session_state.get('name')}")
-            st.rerun()
-        elif st.session_state.get("authentication_status") is False:
-            st.error("❌ Email o password errati")
-        else:
-            st.info("Inserisci le credenziali per accedere.")
-
-        
     # --- REGISTRAZIONE ---
     with tab_register:
         new_email = st.text_input("Nuova Email", key="register_email")
         new_password = st.text_input("Nuova Password", type="password", key="register_password")
-        new_phone = st.text_input("Numero WhatsApp (es. +393491234567)", key="register_phone")
-
         if st.button("Registrati"):
-            if not new_email or not new_password or not new_phone:
-                st.error("⚠️ Tutti i campi sono obbligatori (email, password, telefono).")
+            if register_user(new_email, new_password):
+                st.success("✅ Registrazione completata, ora puoi fare login")
             else:
-                ok = register_user(new_email, new_password, new_phone)
-                if ok:
-                    st.success("✅ Registrazione completata, ora puoi fare login")
-                    st.rerun()
-                else:
-                    st.error("⚠️ Email già registrata")
+                st.error("⚠️ Email già registrata")
 
 # ================================
 # DASHBOARD
@@ -109,24 +69,21 @@ def show_dashboard():
     st.title("💰 Gestione Spese e Risparmi")
     st.write(f"👋 Benvenuto, utente **{user_email}**")
 
-    # --- Link WhatsApp ---
+    # --- Link a WhatsApp Bot ---
     whatsapp_number = "+5519998882067"
-    whatsapp_url = f"https://wa.me/{whatsapp_number.replace('+','')}"
+    whatsapp_url = f"https://wa.me/{whatsapp_number}"
     st.markdown(
         f'<p style="font-size:16px;">📲 Vuoi registrare le spese anche da WhatsApp? '
         f'<a href="{whatsapp_url}" target="_blank"><b>Clicca qui!</b></a></p>',
         unsafe_allow_html=True
     )
 
-    # --- Logout ---
-    authenticator, _ = build_authenticator()
-    authenticator.logout("Logout", location="main", key="logout")
-    if st.session_state.get("authentication_status") is None and st.session_state.is_logged_in:
+    if st.button("Logout"):
         st.session_state.is_logged_in = False
         st.session_state.user_id = None
         st.rerun()
 
-    # --- Carica dati DB ---
+    # --- Carica i dati dal DB ---
     df = pd.DataFrame(get_movimenti(st.session_state.user_id))
     has_data = not df.empty and "tipo" in df.columns
     if has_data:
@@ -148,7 +105,7 @@ def show_dashboard():
         st.info("Nessun dato ancora inserito.")
         return
 
-    # --- Riepilogo spese ---
+    # --- RIEPILOGO SPESE ---
     spese = df[df["tipo"] == "Spesa"].copy()
     if not spese.empty:
         spese["importo"] = pd.to_numeric(spese["importo"], errors="coerce")
@@ -234,7 +191,7 @@ def show_dashboard():
             st.success(f"{tipo_risp} registrato!")
             st.rerun()
 
-    # --- Riepilogo risparmi ---
+    # --- RIEPILOGO RISPARMI ---
     risp = df[df["tipo"] == "Risparmio"].copy()
     if not risp.empty:
         risp["importo"] = pd.to_numeric(risp["importo"], errors="coerce")
@@ -268,6 +225,3 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
-
-
-
