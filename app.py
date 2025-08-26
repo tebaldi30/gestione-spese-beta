@@ -71,12 +71,12 @@ def show_login_page():
     # --- LOGIN ---
     with tab_login:
         authenticator, email_to_id = build_authenticator()
-        auth_status = authenticator.login(location="main", key="login")
+        name, auth_status, username = authenticator.login(location="main", key="login")
 
         if auth_status:
             st.session_state.is_logged_in = True
-            st.session_state.user_id = email_to_id.get(authenticator.username)
-            st.success("✅ Login effettuato con successo!")
+            st.session_state.user_id = email_to_id.get(username)
+            st.success(f"✅ Login effettuato con successo! Benvenuto {username}")
             st.rerun()
         elif auth_status is False:
             st.error("❌ Email o password errati")
@@ -267,3 +267,4 @@ if st.session_state.is_logged_in:
     show_dashboard()
 else:
     show_login_page()
+
